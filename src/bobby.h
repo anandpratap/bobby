@@ -4,10 +4,28 @@
 #include "common.h"
 #include "quadratures.h"
 #include "shapefunctions.h"
+#include "equations.h"
+
 const double __eval_points[2] = {-sqrt(1.0/3.0), sqrt(1.0/3.0)};
 const double __weights[2] = {1.0, 1.0};
 const unsigned int __neval_points = 2;
-
+class Config{
+ private:
+	int periodic, step_count_max, implicit;
+	double cfl, tf;
+	
+	Config(){
+		periodic = 0;
+		step_count_max = 100000;
+		implicit = 0;
+		cfl = 0.8;
+		tf = 0.0;
+	}
+ public:
+	void set_periodic(int val_periodic){
+		periodic = val_periodic;
+	}
+};
 class Bobby{
  public:
 	int n, nvar, nt;

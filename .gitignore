@@ -3,6 +3,7 @@
 *.o
 src/quadratures.py
 src/shapefunctions.py
+src/bobby.py
 *~
 *.pyc
 exe_*
