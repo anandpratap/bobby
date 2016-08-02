@@ -147,10 +147,16 @@ class Bobby{
 	}
 
 	void elemental_quad(unsigned int el, unsigned int quad_idx){
-		double weight =  __weights[quad_idx];
-		double chi = __eval_points[quad_idx];
 		double dchidx = get_dchidx(el);
 		double dxdchi = get_dxdchi(el);
+		double volume = get_volume(el);
+		double weight =  __weights[quad_idx]*volume;
+		double chi = __eval_points[quad_idx];
+		
+
+		double N[2] = {shapefunction->value(chi, 0), shapefunction->value(chi, 1)};
+		double dN[2] = {shapefunction->derivative(chi, 0)*dchidx, shapefunction->derivative(chi, 1)*dchidx};
+
 		
 		double **q_local;
 		q_local = allocate_2d_array<double>(2, nvar);
@@ -165,18 +171,13 @@ class Bobby{
 			}
 		}
 		
-		auto N_0 = shapefunction->value(chi, 0);
-		auto N_1 = shapefunction->value(chi, 1);
-
-		auto dN_0 = shapefunction->derivative(chi, 0)*dchidx;
-		auto dN_1 = shapefunction->derivative(chi, 1)*dchidx;
 
 		
 		for(int ivar=0; ivar<nvar; ivar++){
-			local_mass[el][0+2*ivar][0+2*ivar] += N_0*N_0*dxdchi*weight; // integral
-			local_mass[el][0+2*ivar][1+2*ivar] += N_0*N_1*dxdchi*weight; // integral
-			local_mass[el][1+2*ivar][0+2*ivar] += N_1*N_0*dxdchi*weight; // integral
-			local_mass[el][1+2*ivar][1+2*ivar] += N_1*N_1*dxdchi*weight; // integral
+			local_mass[el][0+2*ivar][0+2*ivar] += N[0]*N[0]*weight; // integral
+			local_mass[el][0+2*ivar][1+2*ivar] += N[0]*N[1]*weight; // integral
+			local_mass[el][1+2*ivar][0+2*ivar] += N[1]*N[0]*weight; // integral
+			local_mass[el][1+2*ivar][1+2*ivar] += N[1]*N[1]*weight; // integral
 		}
 
 		
@@ -185,7 +186,7 @@ class Bobby{
 		double *residual_chi = new double[nvar]();
 		
 		for(int ivar = 0; ivar< nvar; ivar++){
-			q_chi[ivar] = q_local[0][ivar]*N_0 + q_local[1][ivar]*N_1;
+			q_chi[ivar] = q_local[0][ivar]*N[0] + q_local[1][ivar]*N[1];
 		}
 
 		for(int ivar = 0; ivar< nvar; ivar++){
@@ -193,13 +194,13 @@ class Bobby{
 		}
 
 		for(int ivar=0; ivar<nvar; ivar++){
-			local_rhs[el][0+2*ivar] += dN_0*fq_chi[ivar]*dxdchi*weight; // integral
-			local_rhs[el][1+2*ivar] += dN_1*fq_chi[ivar]*dxdchi*weight; // integral
+			local_rhs[el][0+2*ivar] += dN[0]*fq_chi[ivar]*weight; // integral
+			local_rhs[el][1+2*ivar] += dN[1]*fq_chi[ivar]*weight; // integral
 		}
 
 		for(int ivar = 0; ivar< nvar; ivar++){
 			for(int jvar = 0; jvar< nvar; jvar++){
-				residual_chi[ivar] += (q_local[0][jvar]*dN_0 + q_local[1][jvar]*dN_1)*equation->dflux[ivar][jvar](q_chi);
+				residual_chi[ivar] += (q_local[0][jvar]*dN[0] + q_local[1][jvar]*dN[1])*equation->dflux[ivar][jvar](q_chi);
 			}
 		}
 
@@ -212,8 +213,8 @@ class Bobby{
 			double tau_chi =  1.0/sqrt(tau_dt_term + tau_advection_term);
 				
 			for(int jvar = 0; jvar< nvar; jvar++){
-				local_rhs[el][0+2*ivar] -= equation->dflux[ivar][jvar](q_chi)*dN_0*tau_chi*residual_chi[ivar]*dxdchi*weight; // integral
-				local_rhs[el][1+2*ivar] -= equation->dflux[ivar][jvar](q_chi)*dN_1*tau_chi*residual_chi[ivar]*dxdchi*weight; // integral
+				local_rhs[el][0+2*ivar] -= equation->dflux[ivar][jvar](q_chi)*dN[0]*tau_chi*residual_chi[ivar]*weight; // integral
+				local_rhs[el][1+2*ivar] -= equation->dflux[ivar][jvar](q_chi)*dN[1]*tau_chi*residual_chi[ivar]*weight; // integral
 			}
 		}
 
