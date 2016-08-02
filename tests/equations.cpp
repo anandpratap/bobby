@@ -67,5 +67,9 @@ int main(void){
 	system_equation.setup();
 	test_jacobian(&system_equation);
 
+	EulerEquation euler_equation = EulerEquation();
+	euler_equation.setup();
+	test_jacobian(&euler_equation);
+
 	return 0;
 }

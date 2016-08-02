@@ -6,9 +6,13 @@
 #include <cmath>
 #include <vector>
 #include <iostream>
+#include <iomanip>
 #include <armadillo>
 #include <stdio.h>
+#include <algorithm>
 
+
+#define GAMMA 1.4
 typedef double (*func_pointer)(double *);
 typedef double (*func_double)(double);
 

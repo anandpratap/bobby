@@ -26,7 +26,7 @@ def write_1d_restart(ndim, nsize, nelem, x):
     f.close()
 
 ndim = 1
-nsize = 100
+nsize = 300
 nelem = nsize - 1
 x = np.linspace(0, 1, nsize)
 write_1d_restart(ndim, nsize, nelem, x)
@@ -34,7 +34,7 @@ write_1d_restart(ndim, nsize, nelem, x)
 b = Bobby()
 b.run()
 
-u = b.get_solution(nsize*2)
+u = b.get_solution(nsize*3)
 x = b.get_mesh(nsize)
 
 plt.figure()
