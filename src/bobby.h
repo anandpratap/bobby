@@ -33,6 +33,11 @@ class Bobby{
 	double tf, cfl, dt;
 	int periodic, step_count_max, implicit;
 
+
+	int **elm;
+	int **bcm;
+
+	
 	double *x;
 	double *q, *q_old, *dqdt, *dq;
 	double *global_rhs, **global_lhs;
@@ -54,6 +59,9 @@ class Bobby{
 		dq = new double[nt]();
 		global_rhs = new double[nt]();
 
+		elm = allocate_2d_array<int>(n-1, nlocal_node);
+		bcm = allocate_2d_array<int>(n, 3);
+
 		global_lhs = allocate_2d_array<double>(nt, nt);
 		global_mass = allocate_2d_array<double>(nt, nt);
 		global_linearization = allocate_2d_array<double>(nt, nt);
@@ -68,7 +76,7 @@ class Bobby{
 		dq_arma = arma::mat(nt, 1);
 	   	}
 
-	void dellocate(){
+	void deallocate(){
 		delete[] x;
 		delete[] q; delete[] q_old; delete[] dqdt;
 		delete[] dq; delete[] global_rhs;
@@ -78,6 +86,8 @@ class Bobby{
 		release_2d_array(local_rhs, nt-1, 2*nvar);
 		release_3d_array(local_mass, nt-1, 2*nvar, 2*nvar);
 		release_3d_array(local_linearization, nt-1, 2*nvar, 2*nvar);
+		release_2d_array(elm, n-1, nlocal_node);
+		release_2d_array(bcm, n, 3);
 
 	}
 
@@ -111,10 +121,11 @@ class Bobby{
 				global_mass[el*nvar+ivar][(el+1)*nvar+jvar] += local_mass[el][0+2*ivar][1+2*jvar];
 				global_mass[(el+1)*nvar+ivar][el*nvar+jvar] += local_mass[el][1+2*ivar][0+2*jvar];
 				global_mass[(el+1)*nvar+ivar][(el+1)*nvar+jvar] += local_mass[el][1+2*ivar][1+2*jvar];
-				/* global_linearization[el*nvar+ivar][el*nvar+jvar] += local_linearization[el][0+2*ivar][0+2*jvar]; */
-				/* global_linearization[el*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][0+2*ivar][1+2*jvar]; */
-				/* global_linearization[(el+1)*nvar+ivar][el*nvar+jvar] += local_linearization[el][1+2*ivar][0+2*jvar]; */
-                /* global_linearization[(el+1)*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][1+2*ivar][1+2*jvar]; */
+				
+				global_linearization[el*nvar+ivar][el*nvar+jvar] += local_linearization[el][0+2*ivar][0+2*jvar];
+				global_linearization[el*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][0+2*ivar][1+2*jvar];
+				global_linearization[(el+1)*nvar+ivar][el*nvar+jvar] += local_linearization[el][1+2*ivar][0+2*jvar];
+                global_linearization[(el+1)*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][1+2*ivar][1+2*jvar];
 			}
 			global_rhs[el*nvar + ivar] += local_rhs[el][0 + 2*ivar];
             global_rhs[(el+1)*nvar + ivar] += local_rhs[el][1 + 2*ivar];
@@ -127,6 +138,8 @@ class Bobby{
 		array_set_values(nt, nt, global_lhs, 0.0);
 		array_set_values(nt, global_rhs, 0.0);
 		
+		
+		array_set_values(nt-1,2*nvar,2*nvar, local_linearization, 0.0);
 		array_set_values(nt-1,2*nvar,2*nvar, local_mass, 0.0);
 		array_set_values(nt-1,2*nvar, local_rhs, 0.0);
 
@@ -139,6 +152,45 @@ class Bobby{
 		}
 
 
+	}
+
+
+	void newton_update(){
+		unsigned int start = nvar;
+		unsigned int end = nt-nvar;
+
+		for(int i=0; i<nt; i++){
+			rhs_arma(i,0) = global_rhs[i];
+		}
+
+		for(int i=0; i<nt; i++){
+			for(int j=0; j<nt; j++){
+				lhs_arma(i,j) = -global_mass[i][j]/dt + global_linearization[i][j];
+				rhs_arma(i,0) = rhs_arma(i,0) - global_mass[i][j]*(q[j] - q_old[j])/dt;
+			}
+		}
+
+		dq_arma = arma::solve(lhs_arma, rhs_arma);
+		for(int i=start; i<end; i++){
+			q[i] = q[i] - dq_arma(i);
+		}
+		std::cout<<arma::norm(dq_arma)<<std::endl;
+
+	}	
+
+	void implicit_step(){
+		for(int i=0; i<nt; i++){
+			q_old[i] = q[i];
+		}
+
+
+		for(int k=0; k<10; k++){
+			step();
+			newton_update();
+			if(arma::norm(dq_arma) < 1e-3){
+				break;
+			}
+		}
 	}
 
 	void explicit_step(){
@@ -239,6 +291,95 @@ class Bobby{
 				}
 			}
 		}
+
+		if(implicit){
+			for(int ivar=0; ivar<nvar; ivar++){
+				for(int jvar=0; jvar<nvar; jvar++){
+					for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
+						for(int jlocal_node=0; jlocal_node<nlocal_node; jlocal_node++){
+							local_linearization[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*jvar] 
+								+= dN[ilocal_node]*equation->dflux[ivar][jvar](q_chi)*N[jlocal_node]*weight; //integral
+
+							double tau_dt_term = 4.0/dt/dt;
+							double tau_advection_term = 4.0*pow(equation->wavespeed[ivar](q_chi), 2.0)*(dchidx*dchidx);
+							double tau_chi = 1.0/sqrt(tau_dt_term + tau_advection_term);
+							double A_ = 0.0;
+							for(int kvar=0; kvar < nvar; kvar++){
+								A_ += equation->dflux[ivar][kvar](q_chi);
+							}
+							
+							local_linearization[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*jvar] 
+								-= A_*dN[ilocal_node]*tau_chi*equation->dflux[ivar][jvar](q_chi)*dN[jlocal_node]*weight; //integral
+						}
+					}
+
+				}
+			}
+
+		}
+	}
+
+	
+	void set_solution(int val_ni, double *val_qi){
+		assert(val_ni == nt);
+		for(int i=0; i<nt; i++){
+			q[i] = val_qi[i];
+		}
+	}
+	
+	void get_solution(int val_no, double *val_qo){
+		assert(val_no == nt);
+		for(int i=0; i<nt; i++){
+			val_qo[i] = q[i];
+		}
+	}
+
+	void get_mesh(int val_no, double *val_xo){
+		assert(val_no == n);
+		for(int i=0; i<n; i++){
+			val_xo[i] = x[i];
+		}
+	}
+
+	void read_restart(){
+		int ndim, nsize, nelem;
+		std::ifstream restart_file("restart.in");
+		restart_file >> ndim;
+		restart_file >> nsize;
+		restart_file >> nelem;
+		
+		n = nsize;
+		nt = n*nvar;
+		allocate();
+
+		int label;
+		for(int i=0; i<nsize; i++){
+			for(int d=0; d<ndim; d++){
+				restart_file >> label;
+				restart_file >> x[label+d*ndim];
+			}
+		}
+
+		for(int i=0; i<nelem; i++){
+			restart_file >> label;
+			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
+				restart_file >> elm[label][ilocal_node];
+			}
+		}
+
+		for(int i=0; i<nsize; i++){
+			restart_file >> label;
+			for(int ilocal=0; ilocal<2; ilocal++){
+				restart_file >> bcm[label][ilocal];
+			}
+		}
+
+
+
+		restart_file.close();
+
+		
+		
 	}
 
 	void write(){
@@ -267,21 +408,27 @@ class Bobby{
 		shapefunction = &sh;
 		for(int i=0; i<100; i++){
 			std::cout<<i<<std::endl;
-			explicit_step();
+			if(implicit){
+				implicit_step();
+			}
+			else{
+				explicit_step();
+			}
 			write();
 		}
 	}
 
 	Bobby(){
 		nvar = 2;
-		n = 200;
-		nt = n*nvar;
 		nlocal_node = 2;
-		allocate();
+		read_restart();
+		implicit = 1;
+
+		//allocate();
 	}
 
 	~Bobby(){
-		dellocate();
+		deallocate();
 	}
 };
 
