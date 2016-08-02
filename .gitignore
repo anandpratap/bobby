@@ -5,3 +5,6 @@ src/quadratures.py
 src/shapefunctions.py
 *~
 *.pyc
+exe_*
+test_*
+*.dat
