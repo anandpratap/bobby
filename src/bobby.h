@@ -134,7 +134,7 @@ class Bobby{
 			rhs_arma(i,0) = global_rhs[i];
 		}
 		dq_arma = arma::solve(lhs_arma, rhs_arma);
-		for(int i=0; i<nt; i++){
+		for(int i=start; i<nt; i++){
 			q[i] += dq_arma(i)*dt;
 		}
 		std::cout<<arma::norm(dq_arma)<<std::endl;
@@ -227,8 +227,8 @@ class Bobby{
 	void write(){
 		FILE *fp;
 		fp = fopen("out.dat", "w");
-		for(int i=0; i<nt; i++){
-			fprintf(fp, "%.14e %.14e %.14e\n", x[i], q[i], global_rhs[i]);
+		for(int i=0; i<n; i++){
+			fprintf(fp, "%.14e %.14e %.14e\n", x[i], q[2*i], q[2*i+1]);
 		}
 		fclose(fp);
 	}
@@ -236,12 +236,13 @@ class Bobby{
 	void run(){
 		dt = 1e-3;
 		array_linspace(n, x, 0.0, 1.0);
-		for(int i=0; i<nt; i++){
+		for(int i=0; i<n; i++){
 			if(fabs(x[i]-0.5) < 0.3){
-				q[i] = 1.0;
+				q[nvar*i] = 1.0;
+				q[nvar*i+1] = 1.0;
 			}
 		}
-		BurgersEquation eq = BurgersEquation();
+		SystemEquation eq = SystemEquation();
 		equation = &eq;
 		equation->setup();
 		std::cout<<"asdasdaD"<<std::endl;
@@ -255,8 +256,8 @@ class Bobby{
 	}
 
 	Bobby(){
-		nvar = 1;
-		n = 100;
+		nvar = 2;
+		n = 200;
 		nt = n*nvar;
 		allocate();
 	}

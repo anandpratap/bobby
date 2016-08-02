@@ -69,7 +69,7 @@ class SystemEquation: public Equation{
 		auto f_0 = [](double *u){return u[0];};
 		flux[0] = f_0;
 
-		auto f_1 = [](double *u){return u[1];};
+		auto f_1 = [](double *u){return 0.5*u[1];};
 		flux[1] = f_1;
 
 		auto df_00 = [](double *u){return 1.0;};
@@ -81,13 +81,13 @@ class SystemEquation: public Equation{
 		auto df_10 = [](double *u){return 0.0;};
 		dflux[1][0] = df_10;
 		
-		auto df_11 = [](double *u){return 1.0;};
+		auto df_11 = [](double *u){return 0.5;};
 		dflux[1][1] = df_11;
 
 		auto wavespeed_0 = [](double *u){return 1.0;};
 		wavespeed[0] = wavespeed_0;
 
-		auto wavespeed_1 = [](double *u){return 1.0;};
+		auto wavespeed_1 = [](double *u){return 0.5;};
 		wavespeed[1] = wavespeed_1;
 
 	}
