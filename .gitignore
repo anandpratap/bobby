@@ -9,3 +9,7 @@ src/bobby.py
 exe_*
 test_*
 *.dat
+*.tec
+*.in
+*.avi
+*.lay
