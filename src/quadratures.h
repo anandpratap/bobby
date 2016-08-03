@@ -5,11 +5,28 @@
 
 class GaussQuadrature1D{
  public:
-	const double __eval_points[2] = {-sqrt(1.0/3.0), sqrt(1.0/3.0)};
-	const double __weights[2] = {1.0, 1.0};
+	double **__eval_points;
+	double *__weights;
 	const unsigned int __neval_points = 2;
-};
 
+	GaussQuadrature1D(){
+		__weights = new double[__neval_points]();
+		__eval_points = allocate_2d_array<double>(__neval_points, 1);		
+		double w_0 = 1.0;
+		double x_0 = sqrt(1.0/3.0);
+
+		__eval_points[0][0] = -x_0;
+		__weights[0] = w_0;
+		__eval_points[1][0] = x_0;
+		__weights[1] = w_0;
+
+	};
+
+	~GaussQuadrature1D(){
+		release_2d_array(__eval_points, __neval_points, 2);
+		delete[] __weights;
+	};
+};
 
 class GaussQuadrature2D{
  public:
