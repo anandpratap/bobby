@@ -29,6 +29,7 @@ class Bobby{
 	int ndim;
 	int nnode, nlocal_node;
 	double tf, cfl, dt;
+	int step_count;
 	int periodic, step_count_max, implicit;
 
 	int nelem;
@@ -578,12 +579,14 @@ class Bobby{
 			}
 			write();
 			write_tecplot();
+			step_count += 1;
 		}
 	}
 
 	Bobby(){
 		nvar = 4;
 		nlocal_node = 4;
+		step_count = 0;
 		read_restart();
 		implicit = 0;
 
@@ -597,7 +600,11 @@ class Bobby{
 
 	void write_tecplot(){
 		FILE *fp;
-		fp = fopen("solution.tec", "w");
+		std::string s = std::to_string(step_count);
+		std::string ss= "sol_";
+		std::string dest = ss.append(std::string(10-s.length(), '0').append(s).append(".tec"));
+		std::cout<<dest<<std::endl;
+		fp = fopen(dest.c_str(), "w");
 		fprintf(fp, "TITLE = \"%s\"\n", "Example file");
 		fprintf(fp, "VARIABLES = \"X\", \"Y\",");
 		for(int i=0; i<nvar; i++){
