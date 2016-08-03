@@ -4,61 +4,51 @@
 
 #include "common.h"
 
-void test_constant_functions(void){
-	ShapeFunction1D shapefunctions = ShapeFunction1D();
-	GaussQuadrature1D quadrature = GaussQuadrature1D();
+void test_functions_2d(){
+	double integral = 0.0;
+	GaussQuadrature2D quadrature = GaussQuadrature2D();
 	
-	auto func_1 = [](double chi){return 0.0;};
-	assert_almost_equal(quadrature.integral(func_1), 0.0, 13);
-	
-	auto func_2 = [](double chi){return 1.0;};
-	assert_almost_equal(quadrature.integral(func_2), 2.0, 13);
-	
-	auto func_3 = [](double chi){return -1.0;};
-	assert_almost_equal(quadrature.integral(func_3), -2.0, 13);
-}
-
-void test_linear_functions(void){
-	ShapeFunction1D shapefunctions = ShapeFunction1D();
-	GaussQuadrature1D quadrature = GaussQuadrature1D();
-	
-	auto func_1 = [](double chi){return chi;};
-	assert_almost_equal(quadrature.integral(func_1), 0.0, 13);
-	
-	auto func_2 = [](double chi){return chi+1.0;};
-	assert_almost_equal(quadrature.integral(func_2), 2.0, 13);
-	
-	auto func_3 = [](double chi){return chi-1.0;};
-	assert_almost_equal(quadrature.integral(func_3), -2.0, 13);
-}
+	auto f0 = [](double *chi){return 1;}; 
+	integral = 0.0;
+	for(int i=0; i<quadrature.__neval_points; i++){
+		integral += f0(quadrature.__eval_points[i])*quadrature.__weights[i];
+	}
+	assert_almost_equal(integral, 4.0, 1e-10);
 
 
-void test_multiple_functions(void){
-	ShapeFunction1D shapefunctions = ShapeFunction1D();
-	GaussQuadrature1D quadrature = GaussQuadrature1D();
-	
-	auto func_1 = [](double chi){return 1.0;};
-	auto func_2 = [](double chi){return chi;};
-	assert_almost_equal(quadrature.integral(func_1, func_2), 0.0, 13);
+	auto f1 = [](double *chi){return chi[0];}; 
+	integral = 0.0;
+	for(int i=0; i<quadrature.__neval_points; i++){
+		integral += f1(quadrature.__eval_points[i])*quadrature.__weights[i];
+	}
+	assert_almost_equal(integral, 0.0, 1e-10);
 
-	assert_almost_equal(quadrature.integral(func_2, func_2), 2.0/3.0, 13);
-	
-	auto func_3 = [](double chi){return chi+1.0;};
-	assert_almost_equal(quadrature.integral(func_2, func_3), 2.0/3.0, 13);
-	assert_almost_equal(quadrature.integral(func_3, func_2), 2.0/3.0, 13);
 
-	
-	auto func_4 = [](double chi){return chi-1;};
-	assert_almost_equal(quadrature.integral(func_2, func_3, func_4), 0.0, 13);
+	auto f2 = [](double *chi){return chi[1];}; 
+	integral = 0.0;
+	for(int i=0; i<quadrature.__neval_points; i++){
+		integral += f2(quadrature.__eval_points[i])*quadrature.__weights[i];
+	}
+	assert_almost_equal(integral, 0.0, 1e-10);
 
-	auto func_5 = [](double chi){return chi+1;};
-	assert_almost_equal(quadrature.integral(func_2, func_3, func_5), 4.0/3.0, 13);
+	auto f3 = [](double *chi){return chi[0]+chi[1];}; 
+	integral = 0.0;
+	for(int i=0; i<quadrature.__neval_points; i++){
+		integral += f3(quadrature.__eval_points[i])*quadrature.__weights[i];
+	}
+	assert_almost_equal(integral, 0.0, 1e-10);
+
+	auto f4 = [](double *chi){return chi[0]*chi[1];}; 
+	integral = 0.0;
+	for(int i=0; i<quadrature.__neval_points; i++){
+		integral += f4(quadrature.__eval_points[i])*quadrature.__weights[i];
+	}
+	assert_almost_equal(integral, 0.0, 1e-10);
+
 }
 
 
 int main(void){
-	test_constant_functions();
-	test_linear_functions();
-	test_multiple_functions();
+	test_functions_2d();
 	return 0;
 }

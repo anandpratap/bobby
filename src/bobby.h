@@ -6,9 +6,6 @@
 #include "shapefunctions.h"
 #include "equations.h"
 
-const double __eval_points[2] = {-sqrt(1.0/3.0), sqrt(1.0/3.0)};
-const double __weights[2] = {1.0, 1.0};
-const unsigned int __neval_points = 2;
 class Config{
  private:
 	int periodic, step_count_max, implicit;
@@ -34,7 +31,7 @@ class Bobby{
 	double tf, cfl, dt;
 	int periodic, step_count_max, implicit;
 
-
+	int nelem;
 	int **elm;
 	int **bcm;
 
@@ -45,12 +42,17 @@ class Bobby{
 	double **global_mass, **global_linearization;
 	
 	double ***local_mass, ***local_linearization, **local_rhs;
+
+	double ***dxdchi;
+	double ***dchidx;
+	double *volume;
 	arma::sp_mat lhs_arma;
 	arma::mat rhs_arma, dq_arma, q_arma;
 
-	ShapeFunction1D *shapefunction;
-	GaussQuadrature1D *quadrature;
-	Equation *equation;
+	ShapeFunction2D *shapefunction;
+	GaussQuadrature2D *quadrature;
+	EulerEquation2D *equation;
+	
 
 	void allocate(){
 		x = new double[n*ndim]();
@@ -60,17 +62,20 @@ class Bobby{
 		dq = new double[nt]();
 		global_rhs = new double[nt]();
 
-		elm = allocate_2d_array<int>(n-1, nlocal_node);
+		elm = allocate_2d_array<int>(nelem, nlocal_node);
 		bcm = allocate_2d_array<int>(n, 3);
 
 		global_lhs = allocate_2d_array<double>(nt, nt);
 		global_mass = allocate_2d_array<double>(nt, nt);
 		global_linearization = allocate_2d_array<double>(nt, nt);
 
+		dxdchi = allocate_3d_array<double>(nelem,2,2);
+		dchidx = allocate_3d_array<double>(nelem,2,2);
+		volume = new double[nelem]();
 		
-		local_rhs = allocate_2d_array<double>(nt-1,2*nvar);
-		local_mass = allocate_3d_array<double>(nt-1,2*nvar,2*nvar);
-		local_linearization = allocate_3d_array<double>(nt-1,2*nvar,2*nvar);
+		local_rhs = allocate_2d_array<double>(nelem,nlocal_node*nvar);
+		local_mass = allocate_3d_array<double>(nelem,nlocal_node*nvar,nlocal_node*nvar);
+		local_linearization = allocate_3d_array<double>(nelem,nlocal_node*nvar,nlocal_node*nvar);
 		
 		lhs_arma = arma::sp_mat(nt, nt);
 		rhs_arma = arma::mat(nt, 1);
@@ -85,28 +90,62 @@ class Bobby{
 		release_2d_array(global_lhs, nt, nt);
 		release_2d_array(global_mass, nt, nt);
 		release_2d_array(global_linearization, nt, nt);
-		release_2d_array(local_rhs, nt-1, 2*nvar);
-		release_3d_array(local_mass, nt-1, 2*nvar, 2*nvar);
-		release_3d_array(local_linearization, nt-1, 2*nvar, 2*nvar);
-		release_2d_array(elm, n-1, nlocal_node);
+		release_2d_array(local_rhs, nelem, nlocal_node*nvar);
+		release_3d_array(local_mass, nelem, nlocal_node*nvar, nlocal_node*nvar);
+		release_3d_array(local_linearization, nelem, nlocal_node*nvar, nlocal_node*nvar);
+		release_2d_array(elm, nelem, nlocal_node);
 		release_2d_array(bcm, n, 3);
 
+		release_3d_array(dxdchi, nelem, 2, 2);
+		release_3d_array(dchidx, nelem, 2, 2);
+		delete[] volume;
 	}
 
-	double get_dxdchi(unsigned int el){
-		double h = x[el+1] - x[el];
-		return h/2.0;
-	}
+	double calc_metrics(){
+		double chi[2];
+		double x_tmp[4], y_tmp[4];
+		double dxdchi_tmp, dxdeta_tmp, dydchi_tmp, dydeta_tmp;
+		for(int el=0; el<nelem; el++){
+			dxdchi_tmp = 0.0; dxdeta_tmp=0.0;
+			dydchi_tmp = 0.0; dydeta_tmp=0.0;
 
-	double get_dchidx(unsigned int el){
-		return 1.0/get_dxdchi(el);
-	}
-
-	double get_volume(unsigned int el){
-		double h = x[el+1] - x[el];
-		return h/2.0;
-	}
+			for(int ilocal_node=0; ilocal_node < nlocal_node; ilocal_node++){
+				//				std::cout<<ilocal_node<<std::endl;
+				x_tmp[ilocal_node] = x[elm[el][ilocal_node]*ndim + 0];
+				y_tmp[ilocal_node] = x[elm[el][ilocal_node]*ndim + 1];
+			}
 	
+			for(int i=0; i<4; i++){
+				if(i == 0){chi[0] = -1.0; chi[1]=-1.0;}
+				if(i == 1){chi[0] = 1.0; chi[1]=-1.0;}
+				if(i == 2){chi[0] = 1.0; chi[1]=1.0;}
+				if(i == 3){chi[0] = -1.0; chi[1]=1.0;}
+				
+				dxdchi_tmp += x_tmp[i]*shapefunction->derivative(chi, i, 0);
+				dxdeta_tmp += x_tmp[i]*shapefunction->derivative(chi, i, 1);
+
+				dydchi_tmp += y_tmp[i]*shapefunction->derivative(chi, i, 0);
+				dydeta_tmp += y_tmp[i]*shapefunction->derivative(chi, i, 1);
+			}
+			/* std::cout<<dydeta_tmp<<std::endl; */
+			/* std::cout<<dxdchi_tmp<<std::endl; */
+			/* std::cout<<dydchi_tmp<<std::endl; */
+			/* std::cout<<dxdeta_tmp<<std::endl; */
+
+			volume[el] = dxdchi_tmp*dydeta_tmp - dydchi_tmp*dxdeta_tmp;
+			//std::cout<<"vol "<<volume[el]<<std::endl;
+			dxdchi[el][0][0] = dxdchi_tmp;
+			dxdchi[el][0][1] = dxdeta_tmp;
+			dxdchi[el][1][0] = dydchi_tmp;
+			dxdchi[el][1][1] = dydeta_tmp;
+			
+			dchidx[el][0][0] = dydeta_tmp/volume[el];
+			dchidx[el][0][1] = -dydchi_tmp/volume[el];
+			dchidx[el][1][0] = -dxdeta_tmp/volume[el];
+			dchidx[el][1][1] = dxdchi_tmp/volume[el];
+		}
+	}
+
 	double calc_dt(void){
 		dt = 1e0;
 		double q__[nvar];
@@ -119,34 +158,45 @@ class Bobby{
 		for(int i=0; i<n; i++){
 			for(int ivar=0; ivar<nvar; ivar++){q__[ivar] = q[i*nvar+ivar];}
 			for(int ivar=0; ivar<nvar; ivar++){
-				double w = equation->wavespeed[ivar](q__);
+				double w = 0.001;//equation->wavespeed[ivar](q__);
 				dt = fmin(dt, dxmin/fabs(w)*cfl);
 			}
 		}
-		std::cout<<"dt == "<<dt<<std::endl;
+		//std::cout<<"dt == "<<dt<<std::endl;
+		dt = 1e-4;
 		return dt;
 	}
 
-	double get_local_variable(double *var, unsigned int el, unsigned int local_node, unsigned int ivar){
-		return var[(el+local_node)*nvar+ivar];
+	double get_local_variable(double *var, unsigned int el, unsigned int ilocal_node, unsigned int ivar){
+		return var[elm[el][ilocal_node]*nvar+ivar];
 	}
 
 	
 	void global_assembly(unsigned int el){
 		for(int ivar=0; ivar<nvar; ivar++){
 			for(int jvar=0; jvar<nvar; jvar++){
-				global_mass[el*nvar+ivar][el*nvar+jvar] += local_mass[el][0+2*ivar][0+2*jvar];
-				global_mass[el*nvar+ivar][(el+1)*nvar+jvar] += local_mass[el][0+2*ivar][1+2*jvar];
-				global_mass[(el+1)*nvar+ivar][el*nvar+jvar] += local_mass[el][1+2*ivar][0+2*jvar];
-				global_mass[(el+1)*nvar+ivar][(el+1)*nvar+jvar] += local_mass[el][1+2*ivar][1+2*jvar];
-				
-				global_linearization[el*nvar+ivar][el*nvar+jvar] += local_linearization[el][0+2*ivar][0+2*jvar];
-				global_linearization[el*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][0+2*ivar][1+2*jvar];
-				global_linearization[(el+1)*nvar+ivar][el*nvar+jvar] += local_linearization[el][1+2*ivar][0+2*jvar];
-                global_linearization[(el+1)*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][1+2*ivar][1+2*jvar];
+				for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
+					for(int jlocal_node=0; jlocal_node<nlocal_node; jlocal_node++){
+						global_mass[elm[el][ilocal_node]*nvar+ivar][elm[el][jlocal_node]*nvar+jvar] 
+							+= local_mass[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*jvar];
+						//std::cout<<el<<std::endl;
+					}
+				}
+
+				/* global_mass[el*nvar+ivar][el*nvar+jvar] += local_mass[el][0+2*ivar][0+2*jvar]; */
+				/* global_mass[el*nvar+ivar][(el+1)*nvar+jvar] += local_mass[el][0+2*ivar][1+2*jvar]; */
+				/* global_mass[(el+1)*nvar+ivar][el*nvar+jvar] += local_mass[el][1+2*ivar][0+2*jvar]; */
+				/* global_mass[(el+1)*nvar+ivar][(el+1)*nvar+jvar] += local_mass[el][1+2*ivar][1+2*jvar]; */
+
+				/* global_linearization[el*nvar+ivar][el*nvar+jvar] += local_linearization[el][0+2*ivar][0+2*jvar]; */
+				/* global_linearization[el*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][0+2*ivar][1+2*jvar]; */
+				/* global_linearization[(el+1)*nvar+ivar][el*nvar+jvar] += local_linearization[el][1+2*ivar][0+2*jvar]; */
+                /* global_linearization[(el+1)*nvar+ivar][(el+1)*nvar+jvar] += local_linearization[el][1+2*ivar][1+2*jvar]; */
 			}
-			global_rhs[el*nvar + ivar] += local_rhs[el][0 + 2*ivar];
-            global_rhs[(el+1)*nvar + ivar] += local_rhs[el][1 + 2*ivar];
+			
+			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
+				global_rhs[elm[el][ilocal_node]*nvar + ivar] += local_rhs[el][ilocal_node + nlocal_node*ivar];
+			}
 		}
 	}
 
@@ -157,65 +207,49 @@ class Bobby{
 		array_set_values(nt, global_rhs, 0.0);
 		
 		
-		array_set_values(nt-1,2*nvar,2*nvar, local_linearization, 0.0);
-		array_set_values(nt-1,2*nvar,2*nvar, local_mass, 0.0);
-		array_set_values(nt-1,2*nvar, local_rhs, 0.0);
+		array_set_values(nelem,nlocal_node*nvar,nlocal_node*nvar, local_linearization, 0.0);
+		array_set_values(nelem,nlocal_node*nvar,nlocal_node*nvar, local_mass, 0.0);
+		array_set_values(nelem,nlocal_node*nvar, local_rhs, 0.0);
 
-		for(int el=0; el<n-1; el++){
+		for(int el=0; el<nelem; el++){
 			elemental(el);
 		}
 		
-		for(int el=0; el<n-1; el++){
+		for(int el=0; el<nelem; el++){
 			global_assembly(el);
 		}
 
-		// bc
-		double *qb = new double[nvar]();
+		// 
 
-		// rhs
+		for(int inode=0; inode<n; inode++){
+			if(fabs(x[inode*ndim+0]+1) < 2e-2 || fabs(x[inode*ndim+0]-1) < 2e-2 || fabs(x[inode*ndim+1]-1) < 2e-2 || fabs(x[inode*ndim+1]+1) < 2e-2 ){
+				for(int ivar=0; ivar<nvar;ivar++){
+				for(int jnode=0; jnode<n; jnode++){
+					global_mass[inode*nvar+ivar][jnode] = 0.0;
+				}}
 
-		for(int ivar=0; ivar<nvar; ivar++){
-			for(int j=0; j<nvar; j++){qb[j] = q[(n-1)*nvar+j];}
-			if(ivar == 0 || ivar == 1){
-				global_rhs[nt-ivar-1] -= equation->flux[ivar](qb);
-				global_linearization[nt-ivar-1][nt-ivar-1] -=  equation->dflux[ivar][ivar](qb);
-			}
-			else{
-				global_rhs[nt-ivar-1] = qb[ivar] - 0.1/(GAMMA-1.0) - 0.5*qb[1]*qb[1]/qb[0];
-				global_linearization[nt-ivar-1][nt-0-1] =  -0.5*qb[1]*qb[1]/qb[0]/qb[0];
-				global_linearization[nt-ivar-1][nt-1-1] =  -qb[1]/qb[0];
-				global_linearization[nt-ivar-1][nt-2-1] =  1.0;
+				global_rhs[inode*nvar+0] = q[inode*nvar+0]- 1.0;
+				global_mass[inode*nvar+0][inode*nvar+0] = 1.0;
+
+				global_rhs[inode*nvar+1] = q[inode*nvar+1] - 0.0;
+				global_mass[inode*nvar+1][inode*nvar+1] = 1.0;
+				
+				global_rhs[inode*nvar+2] = q[inode*nvar+2] - 0.0;
+				global_mass[inode*nvar+2][inode*nvar+2] = 1.0;
+
+				global_rhs[inode*nvar+3] = q[inode*nvar+3] - 1.0/(GAMMA-1.0);
+				global_mass[inode*nvar+3][inode*nvar+3] = 1.0;
+
+
 			}
 
 		}
-
-
-		// lhs
-
-		for(int ivar=0; ivar<nvar; ivar++){
-			for(int j=0; j<nvar; j++){qb[j] = q[j];}
-			if(ivar == 0 || ivar == 1){
-				global_rhs[ivar] += equation->flux[ivar](qb);
-				global_linearization[ivar][ivar] +=  equation->dflux[ivar][ivar](qb);
-			}
-			else{
-				global_rhs[ivar] = qb[ivar] - 1.0/(GAMMA-1.0) - 0.5*qb[1]*qb[1]/qb[0];
-				global_linearization[ivar][0] =  -0.5*qb[1]*qb[1]/qb[0]/qb[0];
-				global_linearization[ivar][1] =  -qb[1]/qb[0];
-				global_linearization[ivar][2] =  1.0;
-			}
-		}
-
-		// dirchlet
-		
-
-		delete[] qb;
-}
+	}
 
 
 	void newton_update(){
-		int start = nvar;
-		int end = nt-nvar;
+		int start = 0;
+		int end = nt;
 
 		for(int i=0; i<nt; i++){
 			rhs_arma(i,0) = global_rhs[i];
@@ -229,7 +263,6 @@ class Bobby{
 				rhs_arma(i,0) = rhs_arma(i,0) - global_mass[i][j]*(q[j] - q_old[j])/dt;
 			}
 		}
-
 		dq_arma = arma::spsolve(lhs_arma, rhs_arma);
 		for(int i=start; i<end; i++){
 			q[i] = q[i] - dq_arma(i);
@@ -256,23 +289,29 @@ class Bobby{
 
 	void explicit_step(){
 		step();
-		unsigned int start = nvar;
-		unsigned int end = nt-1;
+		unsigned int start = 0;
+		unsigned int end = nt;
 		for(int i=0; i<nt; i++){
 			for(int j=0; j<nt; j++){
 				lhs_arma(i,j) = global_mass[i][j];
 			}
 			rhs_arma(i,0) = global_rhs[i];
 		}
+		//		lhs_arma.print();
+		//rhs_arma.print();
 		dq_arma = arma::spsolve(lhs_arma, rhs_arma);
-		for(int i=start; i<nt; i++){
-			q[i] += dq_arma(i)*dt;
+		for(int i=0; i<nt; i++){
+			//if(fabs(x[i/nvar*ndim+0]+1) < 1e-1 || fabs(x[i/nvar*ndim+0]-1) < 1e-1 || fabs(x[i/nvar*ndim+1]-1) < 1e-1 || fabs(x[i/nvar*ndim+1]+1) < 1e-1 ){
+			//}else{
+			//				std::cout<<x[i/nvar*ndim+0]<<" "<<x[i/nvar*ndim+1]<<std::endl;
+				q[i] += dq_arma(i)*dt;
+				//}
 		}
 		std::cout<<arma::norm(dq_arma)<<std::endl;
 	}
 
 	void elemental(unsigned int el){
-		for(unsigned int quad_idx=0; quad_idx<2; quad_idx++){
+		for(unsigned int quad_idx=0; quad_idx<quadrature->__neval_points; quad_idx++){
 			elemental_quad(el, quad_idx);
 		}
 	}
@@ -280,15 +319,24 @@ class Bobby{
 	
 
 	void elemental_quad(unsigned int el, unsigned int quad_idx){
-		double dchidx = get_dchidx(el);
-		double dxdchi = get_dxdchi(el);
-		double volume = get_volume(el);
-		double weight =  __weights[quad_idx]*volume;
-		double chi = __eval_points[quad_idx];
+		//		double dchidx = get_dchidx(el);
+		//double dxdchi = get_dxdchi(el);
+		//double volume = get_volume(el);
+		
+		double weight = quadrature->__weights[quad_idx]*volume[el];
+		double *chi = quadrature->__eval_points[quad_idx];
 
-		double N[nlocal_node] = {shapefunction->value(chi, 0), shapefunction->value(chi, 1)};
-		double dN[nlocal_node] = {shapefunction->derivative(chi, 0)*dchidx, shapefunction->derivative(chi, 1)*dchidx};
+		double N[nlocal_node] = {shapefunction->value(chi, 0), shapefunction->value(chi, 1), 
+								 shapefunction->value(chi, 2),shapefunction->value(chi, 3)};
 
+		double dN[ndim][nlocal_node];
+		for(int dim=0; dim<ndim; dim++){
+			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
+				//std::cout<<dim<<" "<<ilocal_node<<" "<<dchidx[el][dim][0]<<std::endl;
+				dN[dim][ilocal_node] = shapefunction->derivative(chi, ilocal_node, 0)*dchidx[el][dim][0] 
+					+ shapefunction->derivative(chi, ilocal_node, 1)*dchidx[el][dim][1];
+			}
+		}
 		
 		double q_local[nlocal_node][nvar];
 		double dqdt_local[nlocal_node][nvar];
@@ -306,34 +354,53 @@ class Bobby{
 			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
 				for(int jlocal_node=0; jlocal_node<nlocal_node; jlocal_node++){
 					local_mass[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*ivar] += N[ilocal_node]*N[jlocal_node]*weight; // integral
+					//					std::cout<<local_mass[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*ivar]<<std::endl;
+				}
+			}
+		}
+
+		static double *residual_chi = new double[nvar];
+		static double *q_chi = new double[nvar];
+		static double **fq_chi = allocate_2d_array<double>(ndim, nvar);
+		static double ***dfq_chi = allocate_3d_array<double>(ndim, nvar, nvar);
+		
+		for(int i=0; i<nvar; i++){
+			residual_chi[i] = 0.0;
+			q_chi[i] = 0.0;
+			for(int dim=0;dim<ndim; dim++){
+				fq_chi[dim][i] = 0.0;
+				for(int j=0; j<nvar; j++){
+					dfq_chi[dim][i][j] = 0.0;
 				}
 			}
 		}
 
 		
-		double q_chi[nvar] = {0.0};
-		double fq_chi[nvar] = {0.0};
-		double residual_chi[nvar] = {0.0};
-		
 		for(int ivar = 0; ivar< nvar; ivar++){
-			q_chi[ivar] = q_local[0][ivar]*N[0] + q_local[1][ivar]*N[1];
+			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
+				q_chi[ivar] += q_local[ilocal_node][ivar]*N[ilocal_node];
+			}
 		}
 
-		for(int ivar = 0; ivar< nvar; ivar++){
-			fq_chi[ivar] = equation->flux[ivar](q_chi);
-		}
+		
+		equation->calc_flux(q_chi, fq_chi);
+		equation->calc_dflux(q_chi, dfq_chi);
+
 
 		for(int ivar=0; ivar<nvar; ivar++){
 			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
-				local_rhs[el][ilocal_node+nlocal_node*ivar] += dN[ilocal_node]*fq_chi[ivar]*weight; // integral
-
-			}//			local_rhs[el][1+nlocal_node*ivar] += dN[1]*fq_chi[ivar]*weight; // integral
+				for(int dim=0; dim<ndim; dim++){
+					local_rhs[el][ilocal_node+nlocal_node*ivar] += dN[dim][ilocal_node]*fq_chi[dim][ivar]*weight; // integral
+				}
+			}
 		}
 
 		for(int ivar = 0; ivar< nvar; ivar++){
 			for(int jvar = 0; jvar< nvar; jvar++){
 				for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
-					residual_chi[ivar] += q_local[ilocal_node][jvar]*dN[ilocal_node]*equation->dflux[ivar][jvar](q_chi);
+					for(int dim=0; dim<ndim; dim++){
+						residual_chi[ivar] += q_local[ilocal_node][jvar]*dN[dim][ilocal_node]*dfq_chi[dim][ivar][jvar];
+					}
 				}
 			}
 		}
@@ -342,39 +409,56 @@ class Bobby{
 		
 
 		for(int ivar = 0; ivar< nvar; ivar++){
-			double tau_chi =  equation->get_tau(q_chi, dt, ivar, dchidx);
+			double tau_dt = 1/dt/dt;
+			double tau_u = 0.0;
+			double u_[2] = {q_chi[1]/q_chi[0], q_chi[2]/q_chi[0]};
+			for(int idim=0; idim<ndim; idim++){
+				for(int jdim=0; jdim<ndim; jdim++){
+					for(int kdim=0; kdim<ndim; kdim++){
+						double ujdim = u_[jdim];
+						double ukdim = u_[kdim];
+						tau_u += dchidx[el][idim][jdim]*ujdim*dchidx[el][idim][kdim]*ukdim;
+					}
+				}
+			}
 
-			double A_ = 0.0;
+			
+			double tau_chi = 1.0/sqrt(tau_dt + tau_u);
+			double A_[ndim] = {0.0};
 			for(int kvar=0; kvar < nvar; kvar++){
-				A_ += equation->dflux[ivar][kvar](q_chi);
+				for(int idim=0; idim<ndim; idim++){
+					A_[idim] += dfq_chi[idim][ivar][kvar];
+				}
 			}
 
 			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
-				local_rhs[el][ilocal_node+nlocal_node*ivar] -= A_*dN[ilocal_node]*tau_chi*residual_chi[ivar]*weight; // integral
+				for(int idim=0; idim<ndim; idim++){
+					local_rhs[el][ilocal_node+nlocal_node*ivar] -= A_[idim]*dN[idim][ilocal_node]*tau_chi*residual_chi[ivar]*weight; // integral
+				}
 			}
 		}
 
 		if(implicit){
-			for(int ivar=0; ivar<nvar; ivar++){
-				for(int jvar=0; jvar<nvar; jvar++){
-					for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
-						for(int jlocal_node=0; jlocal_node<nlocal_node; jlocal_node++){
-							local_linearization[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*jvar] 
-								+= dN[ilocal_node]*equation->dflux[ivar][jvar](q_chi)*N[jlocal_node]*weight; //integral
+			/* for(int ivar=0; ivar<nvar; ivar++){ */
+			/* 	for(int jvar=0; jvar<nvar; jvar++){ */
+			/* 		for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){ */
+			/* 			for(int jlocal_node=0; jlocal_node<nlocal_node; jlocal_node++){ */
+			/* 				local_linearization[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*jvar]  */
+			/* 					+= dN[ilocal_node]*equation->dflux[ivar][jvar](q_chi)*N[jlocal_node]*weight; //integral */
 
-							double tau_chi =  equation->get_tau(q_chi, dt, ivar, dchidx);
-							double A_ = 0.0;
-							for(int kvar=0; kvar < nvar; kvar++){
-								A_ += equation->dflux[ivar][kvar](q_chi);
-							}
+			/* 				double tau_chi =  equation->get_tau(q_chi, dt, ivar, dchidx); */
+			/* 				double A_ = 0.0; */
+			/* 				for(int kvar=0; kvar < nvar; kvar++){ */
+			/* 					A_ += equation->dflux[ivar][kvar](q_chi); */
+			/* 				} */
 							
-							local_linearization[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*jvar] 
-								-= A_*dN[ilocal_node]*tau_chi*equation->dflux[ivar][jvar](q_chi)*dN[jlocal_node]*weight; //integral
-						}
-					}
+			/* 				local_linearization[el][ilocal_node+nlocal_node*ivar][jlocal_node+nlocal_node*jvar]  */
+			/* 					-= A_*dN[ilocal_node]*tau_chi*equation->dflux[ivar][jvar](q_chi)*dN[jlocal_node]*weight; //integral */
+			/* 			} */
+			/* 		} */
 
-				}
-			}
+			/* 	} */
+			/* } */
 
 		}
 	}
@@ -402,32 +486,38 @@ class Bobby{
 	}
 
 	void read_restart(){
-		int tmp_ndim, nsize, nelem;
+		int tmp_ndim, nsize;
 		std::ifstream restart_file("restart.in");
 		restart_file >> tmp_ndim;
 		restart_file >> nsize;
 		restart_file >> nelem;
 
 		ndim = tmp_ndim;
+		std::cout<<tmp_ndim<<std::endl;
+		std::cout<<nsize<<std::endl;
+		std::cout<<nelem<<std::endl;
+			
 		n = nsize;
 		nt = n*nvar;
 		allocate();
 
 		int label;
 		for(int i=0; i<nsize; i++){
+			restart_file >> label;
 			for(int d=0; d<ndim; d++){
-				restart_file >> label;
-				restart_file >> x[label+d*ndim];
+				restart_file >> x[label*ndim+d];
 			}
 		}
 
 		for(int i=0; i<nelem; i++){
 			restart_file >> label;
 			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
-				restart_file >> elm[label][ilocal_node];
+				//std::cout<<ilocal_node<<" "<<label<<std::endl;
+				restart_file >> elm[label][nlocal_node-ilocal_node-1];
 			}
 		}
 
+			
 		for(int i=0; i<nsize; i++){
 			restart_file >> label;
 			for(int ilocal=0; ilocal<2; ilocal++){
@@ -438,9 +528,7 @@ class Bobby{
 
 
 		restart_file.close();
-
-		
-		
+		calc_metrics();
 	}
 
 	void write(){
@@ -460,25 +548,25 @@ class Bobby{
 
 	void run(){
 		cfl = 0.01;
-		array_linspace(n, x, 0.0, 1.0);
+		//array_linspace(n, x, 0.0, 1.0);
 		for(int i=0; i<n; i++){
-			if(x[i] < 0.5){
-				q[nvar*i] = 1.0;
-				q[nvar*i+1] = 0.0;
-				q[nvar*i+2] = 2.5;
-			}
-			else{
-				q[nvar*i] = 0.125;
-				q[nvar*i+1] = 0.0;
-				q[nvar*i+2] = 0.25;
-			}
+			double r2 = pow(x[i*ndim+0], 2.0) + pow(x[i*ndim+1], 2.0);
+			q[nvar*i] = 1.0;
+			q[nvar*i+1] = 0.0;
+			double p = 1 + 0.1*exp(-50.0*r2);
+			q[nvar*i+2] = 0.0;
+			q[nvar*i+3] = p/(GAMMA-1);
+			
 		}
-		EulerEquation eq = EulerEquation();
+		EulerEquation2D eq = EulerEquation2D();
 		equation = &eq;
-		equation->setup();
 		std::cout<<"asdasdaD"<<std::endl;
-		ShapeFunction1D sh = ShapeFunction1D();
+		ShapeFunction2D sh = ShapeFunction2D();
+		GaussQuadrature2D g = GaussQuadrature2D();
 		shapefunction = &sh;
+		quadrature = &g;
+		write_tecplot();
+
 		for(int i=0; i<100000; i++){
 			calc_dt();
 			std::cout<<i<<std::endl;
@@ -489,20 +577,48 @@ class Bobby{
 				explicit_step();
 			}
 			write();
+			write_tecplot();
 		}
 	}
 
 	Bobby(){
-		nvar = 3;
-		nlocal_node = 2;
+		nvar = 4;
+		nlocal_node = 4;
 		read_restart();
-		implicit = 1;
+		implicit = 0;
 
 		//allocate();
 	}
 
 	~Bobby(){
 		deallocate();
+	}
+
+
+	void write_tecplot(){
+		FILE *fp;
+		fp = fopen("solution.tec", "w");
+		fprintf(fp, "TITLE = \"%s\"\n", "Example file");
+		fprintf(fp, "VARIABLES = \"X\", \"Y\",");
+		for(int i=0; i<nvar; i++){
+			fprintf(fp, "\"Var_%d\",", i);
+		}
+		fprintf(fp, "\n");
+		fprintf(fp, "ZONE T=\"test\", DATAPACKING=POINT, NODES=%d, ELEMENTS=%d, ZONETYPE=FEQUADRILATERAL\n", n, nelem);
+		for(int i=0; i<n; i++){
+			for(int d=0; d<ndim; d++)
+				fprintf(fp, " %.14f", x[i*ndim+d]);
+			for(int j=0; j<nvar; j++){
+				fprintf(fp, " %.14f", q[i*nvar + j]);
+			}
+			fprintf(fp, "\n");
+		}
+		fprintf(fp, "\n");
+		for(int i=0; i<nelem; i++){
+			fprintf(fp, "%d %d %d %d\n", elm[i][0]+1,  elm[i][1]+1, elm[i][2]+1, elm[i][3]+1);
+		}
+		
+		fclose(fp);
 	}
 };
 
