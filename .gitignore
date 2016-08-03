@@ -13,3 +13,5 @@ test_*
 *.in
 *.avi
 *.lay
+*.mcr
+*.log
