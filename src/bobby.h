@@ -28,7 +28,7 @@ class Bobby{
 	int n, nvar, nt;
 	int ndim;
 	int nnode, nlocal_node;
-	double tf, cfl, dt;
+	double tf, cfl, dt, t;
 	int step_count;
 	int periodic, step_count_max, implicit;
 
@@ -47,10 +47,13 @@ class Bobby{
 	double ***dxdchi;
 	double ***dchidx;
 	double *volume;
+	double *dsmin;
 	arma::sp_mat lhs_arma;
 	arma::mat rhs_arma, dq_arma, q_arma;
 
+	ShapeFunction1D *shapefunction_boundary;
 	ShapeFunction2D *shapefunction;
+	GaussQuadrature1D *quadrature_boundary;
 	GaussQuadrature2D *quadrature;
 	EulerEquation2D *equation;
 	
@@ -73,7 +76,8 @@ class Bobby{
 		dxdchi = allocate_3d_array<double>(nelem,2,2);
 		dchidx = allocate_3d_array<double>(nelem,2,2);
 		volume = new double[nelem]();
-		
+		dsmin = new double[n]();
+		array_set_values(n, dsmin, 1e10);
 		local_rhs = allocate_2d_array<double>(nelem,nlocal_node*nvar);
 		local_mass = allocate_3d_array<double>(nelem,nlocal_node*nvar,nlocal_node*nvar);
 		local_linearization = allocate_3d_array<double>(nelem,nlocal_node*nvar,nlocal_node*nvar);
@@ -106,16 +110,32 @@ class Bobby{
 		double chi[2];
 		double x_tmp[4], y_tmp[4];
 		double dxdchi_tmp, dxdeta_tmp, dydchi_tmp, dydeta_tmp;
+		double ds_min_local = 1e10;
 		for(int el=0; el<nelem; el++){
 			dxdchi_tmp = 0.0; dxdeta_tmp=0.0;
 			dydchi_tmp = 0.0; dydeta_tmp=0.0;
-
+			
 			for(int ilocal_node=0; ilocal_node < nlocal_node; ilocal_node++){
 				//				std::cout<<ilocal_node<<std::endl;
 				x_tmp[ilocal_node] = x[elm[el][ilocal_node]*ndim + 0];
 				y_tmp[ilocal_node] = x[elm[el][ilocal_node]*ndim + 1];
 			}
-	
+
+
+			for(int ilocal_node=0; ilocal_node < nlocal_node; ilocal_node++){
+				for(int jlocal_node=0; jlocal_node < nlocal_node; jlocal_node++){
+					if(ilocal_node != jlocal_node){
+						double ds = pow(x_tmp[ilocal_node]-x_tmp[jlocal_node], 2.0) + 
+							pow(y_tmp[ilocal_node]-y_tmp[jlocal_node], 2.0);
+						ds_min_local = fmin(ds, ds_min_local);
+					}
+				}
+			}
+
+			for(int ilocal_node=0; ilocal_node < nlocal_node; ilocal_node++){
+				dsmin[elm[el][ilocal_node]] = fmin(ds_min_local, dsmin[elm[el][ilocal_node]]);
+			}
+
 			for(int i=0; i<4; i++){
 				if(i == 0){chi[0] = -1.0; chi[1]=-1.0;}
 				if(i == 1){chi[0] = 1.0; chi[1]=-1.0;}
@@ -145,26 +165,28 @@ class Bobby{
 			dchidx[el][1][0] = -dxdeta_tmp/volume[el];
 			dchidx[el][1][1] = dxdchi_tmp/volume[el];
 		}
+
+		
+		/* for(int iglobal_node=0; iglobal_node < n; iglobal_node++){ */
+		/* 	std::cout<<dsmin[iglobal_node]<<std::endl; */
+		/* } */
+
 	}
 
 	double calc_dt(void){
-		dt = 1e0;
-		double q__[nvar];
+		dt = 1e10;
+		double q_tmp[nvar];
 		double dxmin = 1e10;
-		
-		for(int i=0; i<n-1; i++){
-			dxmin = fmin(dxmin, x[i+1] - x[i]);
-		}
-		
-		for(int i=0; i<n; i++){
-			for(int ivar=0; ivar<nvar; ivar++){q__[ivar] = q[i*nvar+ivar];}
-			for(int ivar=0; ivar<nvar; ivar++){
-				double w = 0.001;//equation->wavespeed[ivar](q__);
-				dt = fmin(dt, dxmin/fabs(w)*cfl);
+		double speed[2];
+		cfl = 0.8;
+		for(int iglobal_node=0; iglobal_node<n; iglobal_node++){
+			for(int ivar=0; ivar<nvar; ivar++){q_tmp[ivar] = q[iglobal_node*nvar+ivar];}
+			equation->calc_wavespeed(q_tmp, speed);
+			for(int idim=0; idim<ndim; idim++){
+				dt = fmin(dt, dsmin[iglobal_node]/fabs(speed[idim])*cfl);
 			}
 		}
-		//std::cout<<"dt == "<<dt<<std::endl;
-		dt = 1e-4;
+		std::cout<<"dt == "<<dt<<std::endl;
 		return dt;
 	}
 
@@ -580,6 +602,8 @@ class Bobby{
 			write();
 			write_tecplot();
 			step_count += 1;
+			t += dt;
+			std::cout<<"Time: "<<t<<std::endl;
 		}
 	}
 
@@ -589,7 +613,7 @@ class Bobby{
 		step_count = 0;
 		read_restart();
 		implicit = 0;
-
+		t = 0.0;
 		//allocate();
 	}
 
@@ -601,7 +625,7 @@ class Bobby{
 	void write_tecplot(){
 		FILE *fp;
 		std::string s = std::to_string(step_count);
-		std::string ss= "sol_";
+		std::string ss= "tmp_";
 		std::string dest = ss.append(std::string(10-s.length(), '0').append(s).append(".tec"));
 		std::cout<<dest<<std::endl;
 		fp = fopen(dest.c_str(), "w");

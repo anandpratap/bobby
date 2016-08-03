@@ -230,6 +230,14 @@ class EulerEquation2D{
 		df[1][3][2] = q[3]/q[0] + (GAMMA-1.0)/q[0]*(q[3] - qsq2/2.0/q[0]) - (GAMMA-1)*q[2]*q[2]/q[0]/q[0];
 		df[1][3][3] = q[2]/q[0] + (GAMMA-1.0)*q[2]/q[0];
 	}
+
+	void calc_wavespeed(double *q, double *speed){
+		double qsq2 = q[1]*q[1] + q[2]*q[2];
+		double p = (GAMMA-1.0)*(q[3] - 0.5*qsq2/q[0]);
+
+		speed[0] = sqrt(qsq2) + sqrt(GAMMA*p/q[0]);
+		speed[1] = sqrt(qsq2) + sqrt(GAMMA*p/q[0]);
+	}
 };
 
 
