@@ -35,8 +35,10 @@ class Bobby{
 	int nelem;
 	int **elm;
 	int **bcm;
+	int nbface;
+	int **bface;
+	int *face_tag;
 
-	
 	double *x;
 	double *q, *q_old, *dqdt, *dq;
 	double *global_rhs, **global_lhs;
@@ -68,6 +70,8 @@ class Bobby{
 
 		elm = allocate_2d_array<int>(nelem, nlocal_node);
 		bcm = allocate_2d_array<int>(n, 3);
+		bface = allocate_2d_array<int>(nbface, 2);
+		face_tag = new int[nbface]();
 
 		global_lhs = allocate_2d_array<double>(nt, nt);
 		global_mass = allocate_2d_array<double>(nt, nt);
@@ -100,10 +104,12 @@ class Bobby{
 		release_3d_array(local_linearization, nelem, nlocal_node*nvar, nlocal_node*nvar);
 		release_2d_array(elm, nelem, nlocal_node);
 		release_2d_array(bcm, n, 3);
+		release_2d_array(bface, nbface, 2);
 
 		release_3d_array(dxdchi, nelem, 2, 2);
 		release_3d_array(dchidx, nelem, 2, 2);
 		delete[] volume;
+		delete[] face_tag;
 	}
 
 	double calc_metrics(){
@@ -237,36 +243,42 @@ class Bobby{
 		for(int el=0; el<nelem; el++){
 			elemental(el);
 		}
+
 		
 		for(int el=0; el<nelem; el++){
 			global_assembly(el);
 		}
 
+		for(int face=0; face<nbface; face++){
+			facets(face);
+		}
+
+
 		// 
 
-		for(int inode=0; inode<n; inode++){
-			if(fabs(x[inode*ndim+0]+1) < 2e-2 || fabs(x[inode*ndim+0]-1) < 2e-2 || fabs(x[inode*ndim+1]-1) < 2e-2 || fabs(x[inode*ndim+1]+1) < 2e-2 ){
-				for(int ivar=0; ivar<nvar;ivar++){
-				for(int jnode=0; jnode<n; jnode++){
-					global_mass[inode*nvar+ivar][jnode] = 0.0;
-				}}
+		/* for(int inode=0; inode<n; inode++){ */
+		/* 	if(fabs(x[inode*ndim+0]+1) < 2e-2 || fabs(x[inode*ndim+0]-1) < 2e-2 || fabs(x[inode*ndim+1]-1) < 2e-2 || fabs(x[inode*ndim+1]+1) < 2e-2 ){ */
+		/* 		for(int ivar=0; ivar<nvar;ivar++){ */
+		/* 		for(int jnode=0; jnode<n; jnode++){ */
+		/* 			global_mass[inode*nvar+ivar][jnode] = 0.0; */
+		/* 		}} */
 
-				global_rhs[inode*nvar+0] = q[inode*nvar+0]- 1.0;
-				global_mass[inode*nvar+0][inode*nvar+0] = 1.0;
+		/* 		global_rhs[inode*nvar+0] = q[inode*nvar+0]- 1.0; */
+		/* 		global_mass[inode*nvar+0][inode*nvar+0] = 1.0; */
 
-				global_rhs[inode*nvar+1] = q[inode*nvar+1] - 0.0;
-				global_mass[inode*nvar+1][inode*nvar+1] = 1.0;
+		/* 		global_rhs[inode*nvar+1] = q[inode*nvar+1] - 0.0; */
+		/* 		global_mass[inode*nvar+1][inode*nvar+1] = 1.0; */
 				
-				global_rhs[inode*nvar+2] = q[inode*nvar+2] - 0.0;
-				global_mass[inode*nvar+2][inode*nvar+2] = 1.0;
+		/* 		global_rhs[inode*nvar+2] = q[inode*nvar+2] - 0.0; */
+		/* 		global_mass[inode*nvar+2][inode*nvar+2] = 1.0; */
 
-				global_rhs[inode*nvar+3] = q[inode*nvar+3] - 1.0/(GAMMA-1.0);
-				global_mass[inode*nvar+3][inode*nvar+3] = 1.0;
+		/* 		global_rhs[inode*nvar+3] = q[inode*nvar+3] - 1.0/(GAMMA-1.0); */
+		/* 		global_mass[inode*nvar+3][inode*nvar+3] = 1.0; */
 
 
-			}
+		/* 	} */
 
-		}
+		/* } */
 	}
 
 
@@ -339,6 +351,77 @@ class Bobby{
 		}
 	}
 
+
+	void facets(unsigned int face){
+	
+		int node[2];
+
+		node[0] = bface[face][0];
+		node[1] = bface[face][1];
+
+		double x_tmp[2], y_tmp[2];
+
+		for(int i=0; i<2; i++){
+			
+			x_tmp[i] = x[node[i]*ndim+0];
+			y_tmp[i] = x[node[i]*ndim+1];
+		}
+		double normal[2];
+		double dx = x_tmp[1] - x_tmp[0];
+		double dy = y_tmp[1] - y_tmp[0];
+		double ds = sqrt(dx*dx + dy*dy);
+		normal[0] = dy/ds;
+		normal[1] = -dx/ds;
+
+		double q_local[2][nvar];
+
+		for(int ilocal_node=0; ilocal_node<2; ilocal_node++){
+			for(int ivar=0; ivar<nvar; ivar++){
+				q_local[ilocal_node][ivar] = q[bface[face][ilocal_node]*nvar + ivar];
+			}
+		}
+
+		double volume_face = ds;
+		static double *q_chi = new double[nvar];
+		static double **fq_chi = allocate_2d_array<double>(ndim, nvar);
+		static double **local_face_rhs = allocate_2d_array<double>(2, nvar);
+		array_set_values(2, nvar, local_face_rhs, 0.0);
+		
+		for(unsigned int quad_idx=0; quad_idx<quadrature_boundary->__neval_points; quad_idx++){
+			double weight = quadrature_boundary->__weights[quad_idx]*volume_face;
+			double *chi = quadrature_boundary->__eval_points[quad_idx];
+			double N[2];
+			double dN[2];
+			for(int i=0; i<2; i++){
+				N[i] = shapefunction_boundary->value(chi, i);
+				dN[i] = shapefunction_boundary->derivative(chi, i, 0);
+			}
+
+			for(int ivar=0; ivar<nvar; ivar++){
+				q_chi[ivar] = q_local[0][ivar]*shapefunction_boundary->value(chi, 0) + 
+					q_local[1][ivar]*shapefunction_boundary->value(chi, 1);
+			}
+			equation->calc_flux(q_chi, fq_chi);
+
+			for(int ilocal_node=0; ilocal_node<2; ilocal_node++){
+				for(int idim=0; idim<ndim; idim++){
+					for(int ivar=0; ivar<nvar; ivar++){
+						local_face_rhs[ilocal_node][ivar] += N[ilocal_node]*fq_chi[idim][ivar]*normal[idim]*weight; 
+					}
+				}
+			}
+		}
+
+		
+		for(int ilocal_node=0; ilocal_node<2; ilocal_node++){
+			for(int ivar=0; ivar<nvar; ivar++){
+				//				std::cout<<"ivar "<<ivar<<" inode "<<ilocal_node<<"before "<<global_rhs[bface[face][ilocal_node]*nvar + ivar]<<" "<<local_face_rhs[ilocal_node][ivar]<<std::endl;
+				global_rhs[bface[face][ilocal_node]*nvar + ivar] -= local_face_rhs[ilocal_node][ivar]; 
+				//				std::cout<<"after "<<global_rhs[bface[face][ilocal_node]*nvar + ivar]<<std::endl;
+				
+			}
+		}
+	}
 	
 
 	void elemental_quad(unsigned int el, unsigned int quad_idx){
@@ -514,6 +597,7 @@ class Bobby{
 		restart_file >> tmp_ndim;
 		restart_file >> nsize;
 		restart_file >> nelem;
+		restart_file >> nbface;
 
 		ndim = tmp_ndim;
 		std::cout<<tmp_ndim<<std::endl;
@@ -536,20 +620,18 @@ class Bobby{
 			restart_file >> label;
 			for(int ilocal_node=0; ilocal_node<nlocal_node; ilocal_node++){
 				//std::cout<<ilocal_node<<" "<<label<<std::endl;
-				restart_file >> elm[label][nlocal_node-ilocal_node-1];
+				restart_file >> elm[label][ilocal_node];
 			}
 		}
 
 			
-		for(int i=0; i<nsize; i++){
+		for(int i=0; i<nbface; i++){
 			restart_file >> label;
 			for(int ilocal=0; ilocal<2; ilocal++){
-				restart_file >> bcm[label][ilocal];
+				restart_file >> bface[label][ilocal];
 			}
+			restart_file >> face_tag[label];
 		}
-
-
-
 		restart_file.close();
 		calc_metrics();
 	}
@@ -585,9 +667,17 @@ class Bobby{
 		equation = &eq;
 		std::cout<<"asdasdaD"<<std::endl;
 		ShapeFunction2D sh = ShapeFunction2D();
+		ShapeFunction1D sh1 = ShapeFunction1D();
+
 		GaussQuadrature2D g = GaussQuadrature2D();
+		GaussQuadrature1D g1 = GaussQuadrature1D();
+
 		shapefunction = &sh;
+		shapefunction_boundary = &sh1;
+
 		quadrature = &g;
+		quadrature_boundary = &g1;
+		
 		write_tecplot();
 
 		for(int i=0; i<100000; i++){
