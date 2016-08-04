@@ -169,9 +169,10 @@ class EulerEquation2D{
  public:
 	unsigned int nvar;
 	EulerEquation2D(){nvar = 4;}
-	void calc_flux(double *q, double **f){
-		double qsq2 = q[1]*q[1] + q[2]*q[2];
-		double p = (GAMMA-1.0)*(q[3] - 0.5*qsq2/q[0]);
+	template<class T>
+		void calc_flux(T *q, T **f){
+		T qsq2 = q[1]*q[1] + q[2]*q[2];
+		T p = (GAMMA-1.0)*(q[3] - 0.5*qsq2/q[0]);
 		
 		f[0][0] = q[1];
 		f[0][1] = q[1]*q[1]/q[0] + p;
@@ -183,10 +184,10 @@ class EulerEquation2D{
 		f[1][2] = q[2]*q[2]/q[0] + p;
 		f[1][3] = (q[3] + p)*q[2]/q[0];
 	}
-
-	void calc_dflux(double *q, double ***df){
-		double qsq2 = q[1]*q[1] + q[2]*q[2];
-		double p = (GAMMA-1.0)*(q[3] - 0.5*qsq2/q[0]);
+template<class T>
+	void calc_dflux(T *q, T ***df){
+	T qsq2 = q[1]*q[1] + q[2]*q[2];
+	T p = (GAMMA-1.0)*(q[3] - 0.5*qsq2/q[0]);
 
 		df[0][0][0] = 0.0;
 		df[0][0][1] = 1.0;
@@ -231,9 +232,10 @@ class EulerEquation2D{
 		df[1][3][3] = q[2]/q[0] + (GAMMA-1.0)*q[2]/q[0];
 	}
 
-	void calc_wavespeed(double *q, double *speed){
-		double qsq2 = q[1]*q[1] + q[2]*q[2];
-		double p = (GAMMA-1.0)*(q[3] - 0.5*qsq2/q[0]);
+template<class T>
+	void calc_wavespeed(T *q, T *speed){
+		T qsq2 = q[1]*q[1] + q[2]*q[2];
+		T p = (GAMMA-1.0)*(q[3] - 0.5*qsq2/q[0]);
 
 		speed[0] = sqrt(qsq2) + sqrt(GAMMA*p/q[0]);
 		speed[1] = sqrt(qsq2) + sqrt(GAMMA*p/q[0]);

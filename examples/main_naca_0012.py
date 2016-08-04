@@ -41,10 +41,15 @@ def write_2d_restart(ndim, nsize, nelem, nb, x, y):
           
     _faces = faces()
     for i in range(nb):
-        if(i< 91):
+        if(i< nn-1):
             f.write("%d %d %d 0\n"%(i, _faces[i][0], _faces[i][1]))
         else:
             f.write("%d %d %d 1\n"%(i, _faces[i][0], _faces[i][1]))
+
+
+    for i in range(nsize):
+        f.write("%d %.14e %.14e %.14e %.14e\n"%(i, 1.0, 0.3, 0.0, 1.0/0.4))
+
     f.close()
 
 

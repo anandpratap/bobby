@@ -1,8 +1,11 @@
 CXX=g++
-CFLAGS=-std=c++17 -O0 -g
+CFLAGS=-std=c++17 -O3 -g
 
 LIB=-L${HOME}/local/armadillo/usr/lib -larmadillo
 INC=-I${HOME}/local/armadillo/usr/include
+
+INC+=-I${HOME}/local/adolc/include
+LIB+=-L${HOME}/local/adolc/lib64 -ladolc
 
 INC+=-I${HOME}/local/anaconda2/include/python2.7/
 INC+=-I${HOME}/local/anaconda2/lib/python2.7/site-packages/numpy/core/include/
