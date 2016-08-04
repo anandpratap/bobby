@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.join(os.path.dirname(__file__), "../"))
 from src.bobby import Bobby
 ndim = 2
-nsize = 21
+nsize = 81
 nn = nsize
 ne = nn - 1
 
@@ -41,22 +41,29 @@ def write_2d_restart(ndim, nsize, nelem, nb, x, y):
           
     _faces = faces()
     for i in range(nb):
-        f.write("%d %d %d 0\n"%(i, _faces[i][0], _faces[i][1]))
+        if(i< 91):
+            f.write("%d %d %d 0\n"%(i, _faces[i][0], _faces[i][1]))
+        else:
+            f.write("%d %d %d 1\n"%(i, _faces[i][0], _faces[i][1]))
     f.close()
 
+
+
 nelem = nsize - 1
-xx = np.linspace(-.5, .5, nsize)
-yy = np.linspace(-.5, .5, nsize)
+#xx = np.linspace(-.5, .5, nsize)
+#yy = np.linspace(-.5, .5, nsize)
 nb = nelem*4
-x, y = np.meshgrid(xx, yy)
+#x, y = np.meshgrid(xx, yy)
+xr, yr = np.loadtxt("naca.dat", skiprows=1, unpack=True)
+x = np.reshape(xr, [nsize, nsize]).T
+y = np.reshape(yr, [nsize, nsize]).T
+#xr = x.copy()
+#yr = y.copy()
 
-xr = x.copy()
-yr = y.copy()
+#theta = np.pi/4.0*0
 
-theta = np.pi/4.0*0
-
-x =  xr*np.cos(theta) - yr*np.sin(theta)
-y =  xr*np.sin(theta) + yr*np.cos(theta) 
+#x =  xr*np.cos(theta) - yr*np.sin(theta)
+#y =  xr*np.sin(theta) + yr*np.cos(theta) 
 
 nsize = nsize**2
 nelem = nelem**2
